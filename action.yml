@@ -12,19 +12,25 @@ inputs:
     description: "SSH username"
     required: true
   ssh_remote_port:
-    description: 'The SSH port of the remote server you would like to connect to.'
-    default: '22'
+    description: "SSH port"
+    default: "22"
     required: false
   file:
-    description: "Path to stack/compose file"
+    description: "Path to stack/compose file (on remote, relative to remote_workdir)"
     required: true
   stack_name:
-    description: 'Name of stack'
+    description: "Name of stack"
     required: true
   env_list:
-    description: "Multiline list of environment variables to export"
+    description: "Multi-line KEY=VALUE list of env vars to export before running docker stack"
     required: false
-    default: ""
+  ssh_remote_known_hosts:
+    description: "Optional known_hosts line for your SSH server (host key). If omitted, ssh-keyscan is used."
+    required: false
+  remote_workdir:
+    description: "Optional remote working directory. Defaults to /home/<ssh_user>/${GITHUB_REPOSITORY}"
+    required: false
+
 
 runs:
   using: "docker"
