@@ -1,0 +1,35 @@
+name: 'github-actions-docker-swarm-env'
+author: "Erik Petrosyan <dev.erikpetrosyan@gmail.com>"
+description: "Deploy a Docker Swarm stack over SSH with environment variable injection."
+inputs:
+  ssh_private_key:
+    description: "SSH private key"
+    required: true
+  ssh_host:
+    description: "Hostname or IP of the Swarm manager"
+    required: true
+  ssh_user:
+    description: "SSH username"
+    required: true
+  ssh_remote_port:
+    description: 'The SSH port of the remote server you would like to connect to.'
+    default: '22'
+    required: false
+  file:
+    description: "Path to stack/compose file"
+    required: true
+  stack_name:
+    description: 'Name of stack'
+    required: true
+  env_list:
+    description: "Multiline list of environment variables to export"
+    required: false
+    default: ""
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+
+branding:
+  icon: "upload-cloud"
+  color: "blue"
