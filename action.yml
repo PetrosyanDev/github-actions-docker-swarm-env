@@ -11,9 +11,18 @@ inputs:
   ssh_user:
     description: "SSH username"
     required: true
-  ssh_remote_port:
+  ssh_port:
     description: "SSH port"
     default: "22"
+    required: false
+  registry:
+    description: "Container registry URL to use for docker login."
+    required: false
+  registry-username:
+    description: "Username for the container registry."
+    required: false
+  registry-password:
+    description: "Password or token for the container registry."
     required: false
   file:
     description: "Path to stack/compose file (on remote, relative to remote_workdir)"
@@ -33,8 +42,69 @@ inputs:
 
 
 runs:
-  using: "docker"
-  image: "Dockerfile"
+  using: 'composite'
+  steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Prepare SSH configuration.
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+      shell: bash
+
+    - name: Add SSH key.
+      run: |
+        ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+        if ! echo "${{ inputs.ssh_private_key }}" | tr -d '\r' | ssh-add - 2>/dev/null; then
+          echo "::error::The provided SSH private key is not in a valid format. Please check your ssh_private_key input."
+          exit 1
+        fi
+      env:
+        SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      shell: bash
+
+    - name: Verify SSH Connection
+      run: |
+        echo "::group::Validating SSH Connection"
+        echo "Attempting to connect to ${{ inputs.ssh_host }} on port ${{ inputs.ssh_port }} as user ${{ inputs.ssh_user }}"
+
+        connection_successful=false
+
+        if timeout 10s ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p ${{ inputs.ssh_port }} ${{ inputs.ssh_user }}@${{ inputs.ssh_host }} exit 2>/dev/null; then
+          echo "SSH connection successful"
+          connection_successful=true
+        fi
+
+        if $connection_successful; then
+          echo "::endgroup::"
+          exit 0
+        fi
+
+        echo "::error::SSH CONNECTION FAILED%0A%0A\
+        exit 1
+      shell: bash
+      env:
+        SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+
+    - name: Login to registry. (${{ inputs.registry }})
+      uses: docker/login-action@v3
+      with:
+        username: ${{ inputs.registry-username }}
+        password: ${{ inputs.registry-password }}
+        registry: ${{ inputs.registry }}
+
+    - name: Run Docker Stack deployment via SSH.
+      run: |
+        docker -H ssh://${{ inputs.ssh_user }}@${{ inputs.ssh_host }}:${{ inputs.ssh_port }} \
+          stack deploy --detach=false --with-registry-auth \
+          -c ${{ inputs.file }} \
+          ${{ inputs.stack_name }} \
+          --prune
+      shell: bash
+      env:
+        SSH_AUTH_SOCK: /tmp/ssh_agent.sock
 
 branding:
   icon: "upload-cloud"
