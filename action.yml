@@ -16,7 +16,7 @@ inputs:
     default: "22"
     required: false
   registry:
-    description: "Container registry URL to use for docker login."
+    description: "Container registry URL to use for docker login (e.g. ghcr.io). Leave empty to skip login."
     required: false
   registry-username:
     description: "Username for the container registry."
@@ -25,21 +25,17 @@ inputs:
     description: "Password or token for the container registry."
     required: false
   file:
-    description: "Path to stack/compose file (on remote, relative to remote_workdir)"
+    description: "Path to stack/compose file on the GitHub Actions runner (local path)."
     required: true
   stack_name:
     description: "Name of stack"
     required: true
   env_list:
-    description: "Multi-line KEY=VALUE list of env vars to export before running docker stack"
+    description: "Multi-line KEY=VALUE list of env vars to export before running docker stack."
     required: false
   ssh_remote_known_hosts:
-    description: "Optional known_hosts line for your SSH server (host key). If omitted, ssh-keyscan is used."
+    description: "Optional known_hosts line for your SSH server (host key). If omitted, StrictHostKeyChecking=no is used."
     required: false
-  remote_workdir:
-    description: "Optional remote working directory. Defaults to /home/<ssh_user>/${GITHUB_REPOSITORY}"
-    required: false
-
 
 runs:
   using: 'composite'
@@ -48,15 +44,22 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Prepare SSH configuration.
+    - name: Prepare SSH configuration
       run: |
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
+
+        # If a known_hosts line is provided, append it; otherwise we rely on StrictHostKeyChecking=no
+        if [ -n "${{ inputs.ssh_remote_known_hosts }}" ]; then
+          echo "${{ inputs.ssh_remote_known_hosts }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+        fi
       shell: bash
 
-    - name: Add SSH key.
+    - name: Start ssh-agent and add SSH key
       run: |
-        ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+        mkdir -p "$(dirname "$SSH_AUTH_SOCK")"
+        ssh-agent -a "$SSH_AUTH_SOCK" > /dev/null
         if ! echo "${{ inputs.ssh_private_key }}" | tr -d '\r' | ssh-add - 2>/dev/null; then
           echo "::error::The provided SSH private key is not in a valid format. Please check your ssh_private_key input."
           exit 1
@@ -65,46 +68,84 @@ runs:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
       shell: bash
 
-    - name: Verify SSH Connection
+    - name: Verify SSH connection
       run: |
         echo "::group::Validating SSH Connection"
         echo "Attempting to connect to ${{ inputs.ssh_host }} on port ${{ inputs.ssh_port }} as user ${{ inputs.ssh_user }}"
 
-        connection_successful=false
-
-        if timeout 10s ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p ${{ inputs.ssh_port }} ${{ inputs.ssh_user }}@${{ inputs.ssh_host }} exit 2>/dev/null; then
+        if timeout 10s ssh \
+          -o BatchMode=yes \
+          -o ConnectTimeout=5 \
+          -o StrictHostKeyChecking=no \
+          -p "${{ inputs.ssh_port }}" \
+          "${{ inputs.ssh_user }}@${{ inputs.ssh_host }}" exit 2>/dev/null; then
           echo "SSH connection successful"
-          connection_successful=true
-        fi
-
-        if $connection_successful; then
           echo "::endgroup::"
           exit 0
         fi
 
-        echo "::error::SSH CONNECTION FAILED%0A%0A\
+        echo "::error::SSH CONNECTION FAILED%0A%0AHost: ${{ inputs.ssh_user }}@${{ inputs.ssh_host }}:${{ inputs.ssh_port }}%0ACheck your SSH key, host, and network."
+        echo "::endgroup::"
         exit 1
-      shell: bash
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      shell: bash
 
-    - name: Login to registry. (${{ inputs.registry }})
+    - name: Login to registry (${{ inputs.registry }})
+      if: ${{ inputs.registry && inputs['registry-username'] && inputs['registry-password'] }}
       uses: docker/login-action@v3
       with:
-        username: ${{ inputs.registry-username }}
-        password: ${{ inputs.registry-password }}
+        username: ${{ inputs['registry-username'] }}
+        password: ${{ inputs['registry-password'] }}
         registry: ${{ inputs.registry }}
 
-    - name: Run Docker Stack deployment via SSH.
+    - name: Prepare environment variables from env_list
+      if: ${{ inputs.env_list }}
       run: |
-        docker -H ssh://${{ inputs.ssh_user }}@${{ inputs.ssh_host }}:${{ inputs.ssh_port }} \
-          stack deploy --detach=false --with-registry-auth \
-          -c ${{ inputs.file }} \
-          ${{ inputs.stack_name }} \
-          --prune
+        echo "Exporting environment variables from env_list"
+        # Each non-empty line should be KEY=VALUE
+        while IFS='=' read -r key value; do
+          # Skip empty or malformed lines
+          if [ -z "$key" ]; then
+            continue
+          fi
+
+          # Trim spaces around key
+          key="$(echo "$key" | xargs)"
+
+          if [ -z "$key" ]; then
+            continue
+          fi
+
+          echo "Exporting $key"
+          export "$key=$value"
+        done <<< "${{ inputs.env_list }}"
+
+        # Persist to GITHUB_ENV so they are available in the deploy step
+        while IFS='=' read -r key value; do
+          if [ -z "$key" ]; then
+            continue
+          fi
+          key="$(echo "$key" | xargs)"
+          if [ -z "$key" ]; then
+            continue
+          fi
+          echo "$key=$value" >> "$GITHUB_ENV"
+        done <<< "${{ inputs.env_list }}"
       shell: bash
+
+    - name: Run Docker Stack deployment via SSH
+      run: |
+        # If previous step changed directory, honor it; otherwise stay in repo root
+
+        docker -H "ssh://${{ inputs.ssh_user }}@${{ inputs.ssh_host }}:${{ inputs.ssh_port }}" \
+          stack deploy --detach=false --with-registry-auth \
+          -c "${{ inputs.file }}" \
+          "${{ inputs.stack_name }}" \
+          --prune
       env:
         SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      shell: bash
 
 branding:
   icon: "upload-cloud"
