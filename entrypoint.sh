@@ -11,7 +11,7 @@ ENV_LIST="${INPUT_ENV_LIST:-}"
 
 # Setup SSH
 mkdir -p ~/.ssh
-echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+printf "%s" "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
 chmod 600 ~/.ssh/id_rsa
 
 ssh-keyscan -p "$SSH_REMOTE_PORT" -t rsa "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
@@ -32,8 +32,12 @@ if [ -n "$ENV_LIST" ]; then
     done <<< "$ENV_LIST"
 fi
 
-# Deploy stack via SSH
-ssh -p "$SSH_REMOTE_PORT" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
-    "${ENV_EXPORTS} docker stack deploy --with-registry-auth -c \"$FILE\" \"$STACK_NAME\""
+ssh \
+  -i ~/.ssh/id_rsa \
+  -p "$SSH_REMOTE_PORT" \
+  -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=no \
+  "$SSH_USER@$SSH_HOST" \
+  "${ENV_EXPORTS} docker stack deploy --with-registry-auth -c \"$FILE\" \"$STACK_NAME\""
 
 echo "Stack '$STACK_NAME' deployed successfully!"
