@@ -2,6 +2,11 @@
 
 Deploy a Docker Swarm stack over SSH from GitHub Actions, with environment variable injection.
 
+-   Secure SSH
+-   Automatic key loading
+-   Environment variable injection
+-   Docker stack deploy
+
 ## Usage
 
 ```yaml
@@ -30,7 +35,7 @@ Deploy a Docker Swarm stack over SSH from GitHub Actions, with environment varia
 | ssh_host               | yes      | Hostname or IP of Swarm manager node                       |
 | ssh_user               | yes      | SSH username                                               |
 | ssh_port               | no       | SSH port (default: 22)                                     |
-| file                   | yes      | Path to stack or compose file (on runner)                  |
+| file                   | yes      | Path to stack or compose file on the server                |
 | stack_name             | yes      | Name for the Docker stack                                  |
 | env_list               | no       | Multi-line list (KEY=VALUE) of env vars for the deployment |
 | registry               | no       | Container registry URL (for docker login)                  |
